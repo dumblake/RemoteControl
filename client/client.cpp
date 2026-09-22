@@ -19,6 +19,32 @@ struct Packet {
     char body[];
 };
 
+enum Mouse_Enum {
+    MOUSE_MOVE = 1,
+    MOUSE_LEFT_DOWN = 2,
+    MOUSE_LEFT_UP = 3,
+    MOUSE_RIGHT_DOWN = 4,
+    MOUSE_RIGHT_UP = 5,
+    MOUSE_MIDDLE_DOWN = 6,
+    MOUSE_MIDDLE_UP = 7,
+    MOUSE_LEFT_CLICK = 8,
+    MOUSE_RIGHT_CLICK = 9,
+    MOUSE_MIDDLE_CLICK = 10,
+    MOUSE_LEFT_DOUBLE_CLICK = 11,
+    MOUSE_RIGHT_DOUBLE_CLICK = 12,
+    MOUSE_MIDDLE_DOUBLE_CLICK = 13,
+};
+
+struct Mouse {
+    int action;
+    POINT point;
+};
+
+struct Key_Board {
+    int virtual_code;
+    int key_status;
+};
+
 enum Cmd {
     CMD_SCREEN = 1,
     CMD_MOUSE = 2,
@@ -41,9 +67,13 @@ SOCKADDR_IN g_server_addr;
 HWND g_hwnd = NULL;
 CImage g_image;
 CRITICAL_SECTION g_critical_section; // used to protect g_image
+int g_remote_width = -1;
+int g_remote_height = -1;
 
-// typedef LRESULT (CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+// window procedure
 LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
+    static ULONGLONG mouse_tick = GetTickCount64(); // used to control mouse move frequency
+
     switch (msg) {
     case WM_PAINT: {
         PAINTSTRUCT ps;
@@ -57,7 +87,7 @@ LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
 
             int old_mode = SetStretchBltMode(hdc, HALFTONE); // HALFTONE 高清
             SetBrushOrgEx(hdc, 0, 0, NULL); // set brush origin location
-            
+
             EnterCriticalSection(&g_critical_section); // enter critical section to protect g_image
             int remote_width = g_image.GetWidth();
             int remote_height = g_image.GetHeight();
@@ -70,6 +100,180 @@ LRESULT CALLBACK winProc(HWND hwnd, UINT msg, WPARAM w_param, LPARAM l_param) {
         }
 
         EndPaint(hwnd, &ps);
+        break;
+    }
+    case WM_MOUSEMOVE: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            static int count = 0;
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = {0};
+            mouse.action = MOUSE_MOVE;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            count++;
+            char buf[30];
+            sprintf_s(buf, "mouse count: %d\r\n", count);
+            OutputDebugString(buf);
+            free(packet);
+
+            //if (GetTickCount64() - mouse_tick > 500) {            
+            //    Packet *packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            //    send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            //    count++;
+            //    char buf[30];
+            //    sprintf_s(buf, "mouse count: %d\r\n", count);
+            //    OutputDebugString(buf);
+            //    free(packet);
+            //    mouse_tick = GetTickCount64();
+            //}
+        }
+        break;
+    }
+    case WM_LBUTTONDOWN: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = { 0 };
+            mouse.action = MOUSE_LEFT_DOWN;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            free(packet);
+        }
+        break;
+    }
+    case WM_LBUTTONUP: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = { 0 };
+            mouse.action = MOUSE_LEFT_UP;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            free(packet);
+        }
+        break;
+    }
+    case WM_LBUTTONDBLCLK: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = { 0 };
+            mouse.action = MOUSE_LEFT_DOUBLE_CLICK;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            free(packet);
+        }
+        break;
+    }
+    case WM_RBUTTONDOWN: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = { 0 };
+            mouse.action = MOUSE_RIGHT_DOWN;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            free(packet);
+        }
+        break;
+    }
+    case WM_RBUTTONUP: {
+        int x_position = LOWORD(l_param);
+        int y_position = HIWORD(l_param); // macro
+        RECT client_rect;
+        GetClientRect(hwnd, &client_rect);
+        int client_width = client_rect.right - client_rect.left;
+        int client_height = client_rect.bottom - client_rect.top;
+
+        // client mouse position to remote mouse position
+        if (g_remote_width != -1 && g_remote_height != -1) {
+            int remote_x_position = x_position * g_remote_width / client_width; // scale to remote screen position
+            int remote_y_position = y_position * g_remote_height / client_height; // scale to remote screen position
+
+            // send mouse move command to server
+            Mouse mouse = { 0 };
+            mouse.action = MOUSE_RIGHT_UP;
+            mouse.point.x = remote_x_position;
+            mouse.point.y = remote_y_position;
+            Packet* packet = pack_packet(CMD_MOUSE, (char*)&mouse.action, sizeof(Mouse));
+            send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+            free(packet);
+        }
+        break;
+    }
+    case WM_KEYDOWN: 
+    case WM_SYSKEYDOWN: {
+        int virtual_code = (int)w_param;
+        Key_Board key_board = { 0 };
+        key_board.virtual_code = virtual_code;
+        key_board.key_status = 0; // key down
+        Packet* packet = pack_packet(CMD_KEYBOARD, (char*)&key_board.virtual_code, sizeof(Key_Board));
+        OutputDebugString("发送键盘按下事件\r\n");
+        send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
+        OutputDebugString("发送键盘按下事件成功\r\n");
+        free(packet);
         break;
     }
     default:
@@ -99,7 +303,7 @@ int WINAPI WinMain(HINSTANCE handle_instance,
     // create thread used to loop send screen data
     DWORD send_screen_thread_id = 0;
     HANDLE handle_send_screen = CreateThread(NULL, 0, send_screen_callback, NULL, 0, &send_screen_thread_id);
-    OutputDebugString("连接服务器成功\r\n");
+    printf("连接服务器成功\r\n");
 
     // process message like queue
     MSG message = { 0 };
@@ -112,22 +316,24 @@ int WINAPI WinMain(HINSTANCE handle_instance,
 DWORD WINAPI send_screen_callback(LPVOID lpThreadParameter) {
     char* receive_buffer = (char*)malloc(RECV_BUFFER_SIZE);
     if (receive_buffer == NULL) {
-        printf("malloc receive_buffer failed\r\n");
+        OutputDebugString("malloc receive_buffer failed\r\n");
         return 0;
     }
-    
+
     while (true) {
         Packet* packet = pack_packet(CMD_SCREEN, NULL, 0); // just send one cammand
         int send_len = send(g_client_socket, (char*)&packet->header.magic, get_packet_len(packet), 0);
         if (send_len > 0) {
-            OutputDebugString("成功发送数据");
+            OutputDebugString("成功发送数据\r\n");
         }
         free(packet);
+
+        OutputDebugString("等待接受屏幕命令数据\r\n");
         int len = recv(g_client_socket, receive_buffer, RECV_BUFFER_SIZE, 0);
         if (len > 0) {
             Packet* receive_packet = parse_packet(receive_buffer, RECV_BUFFER_SIZE);
             if (receive_packet != NULL) { // parsed packet successful
-                // process packet body data
+                // process packet body 
                 HGLOBAL heap_memory = GlobalAlloc(GMEM_MOVEABLE, 0);
                 if (heap_memory == NULL)
                     continue;
@@ -141,12 +347,16 @@ DWORD WINAPI send_screen_callback(LPVOID lpThreadParameter) {
 
                     LARGE_INTEGER large_integer = { 0 };
                     p_stream->Seek(large_integer, STREAM_SEEK_SET, NULL); // set stream pointer to the beginning of the stream
-                    
+
                     EnterCriticalSection(&g_critical_section); // enter critical section to protect g_image
                     if (g_image.IsNull() == FALSE) {
                         g_image.Destroy(); // destroy the old image to avoid memory leak
                     }
                     g_image.Load(p_stream); // load image from stream
+                    if (g_remote_width == -1 && g_remote_height == -1) {
+                        g_remote_width = g_image.GetWidth();
+                        g_remote_height = g_image.GetHeight();
+                    }
                     LeaveCriticalSection(&g_critical_section); // leave critical section
 
                     InvalidateRect(g_hwnd, NULL, FALSE); // invalidate the entire client area of the window, causing a WM_PAINT message to be sent to the window
@@ -187,6 +397,7 @@ int init_window(HINSTANCE handle_instance, int num_cmd_show) {
     ShowWindow(g_hwnd, num_cmd_show);
 
     UpdateWindow(g_hwnd);
+    return 1;
 }
 
 /* main just a console program, not a windows GUI program, so no need to use WinMain */
@@ -260,10 +471,12 @@ int init_window(HINSTANCE handle_instance, int num_cmd_show) {
 //}
 
 Packet* pack_packet(int cmd, char* buffer, int buffer_len) {
+    // Need free packet after send, otherwise memory leak
+
     Packet* packet = (Packet*)malloc(buffer_len + sizeof(Packet_Header));
-    if (packet == NULL) {
+    if (packet == NULL)
         return NULL;
-    }
+
     packet->header.magic = 0x55AA77CC;
     packet->header.cmd = cmd;
     packet->header.body_len = buffer_len;
@@ -328,7 +541,9 @@ int init_socket(void) {
     g_server_addr;
     g_server_addr.sin_family = AF_INET;
     g_server_addr.sin_port = htons(9999);    // 转为网络字节序
-    g_server_addr.sin_addr.S_un.S_addr = inet_addr("192.168.1.4");
+    //g_server_addr.sin_addr.S_un.S_addr = inet_addr("192.168.1.4");
+    g_server_addr.sin_addr.S_un.S_addr = inet_addr("192.168.37.129");
+    return 1;
 }
 
 int get_packet_len(Packet* packet) {
